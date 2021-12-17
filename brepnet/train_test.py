@@ -24,38 +24,38 @@ from absl.testing import parameterized
 
 from brepnet import train
 
+
 class TrainTest(parameterized.TestCase):
+    def setUp(self):
+        super().setUp()
+        # Make sure tf does not allocate gpu memory.
+        tf.config.experimental.set_visible_devices([], "GPU")
 
-  def setUp(self):
-    super().setUp()
-    # Make sure tf does not allocate gpu memory.
-    tf.config.experimental.set_visible_devices([], 'GPU')
+        # Print the current platform (the default device).
+        platform = jax.local_devices()[0].platform
+        print("Running on platform:", platform.upper())
 
-    # Print the current platform (the default device).
-    platform = jax.local_devices()[0].platform
-    print("Running on platform:", platform.upper())
+    @parameterized.parameters(
+        dict(loss=[[0.5, 1.], [1.5, 1.3], [2., 1.2]],
+             logits=[[-1., 1.], [1., 1.], [2., 0.]],
+             labels=[[0, jnp.nan], [1, 0], [0, 1]],
+             mask=[[True, False], [True, True], [False, False]],
+             expected_results={
+                 "loss": 1.1,
+                 "accuracy": 2 / 3
+             }), )
+    def test_train_metrics(self, loss, logits, labels, mask, expected_results):
+        loss = jnp.asarray(loss)
+        logits = jnp.asarray(logits)
+        labels = jnp.asarray(labels)
+        mask = jnp.asarray(mask)
 
-  @parameterized.parameters(
-      dict(
-          loss=[[0.5, 1.], [1.5, 1.3], [2., 1.2]],
-          logits=[[-1., 1.], [1., 1.], [2., 0.]],
-          labels=[[0, jnp.nan], [1, 0], [0, 1]],
-          mask=[[True, False], [True, True], [False, False]],
-          expected_results={
-              'loss': 1.1,
-              'accuracy': 2 / 3
-          }),)
-  def test_train_metrics(self, loss, logits, labels, mask, expected_results):
-    loss = jnp.asarray(loss)
-    logits = jnp.asarray(logits)
-    labels = jnp.asarray(labels)
-    mask = jnp.asarray(mask)
-
-    train_metrics = train.TrainMetrics.single_from_model_output(
-        loss=loss, logits=logits, labels=labels, mask=mask).compute()
-    for metric in expected_results:
-      self.assertAlmostEqual(expected_results[metric], train_metrics[metric])
+        train_metrics = train.TrainMetrics.single_from_model_output(
+            loss=loss, logits=logits, labels=labels, mask=mask).compute()
+        for metric in expected_results:
+            self.assertAlmostEqual(expected_results[metric],
+                                   train_metrics[metric])
 
 
 if __name__ == "__main__":
-  absltest.main()
+    absltest.main()

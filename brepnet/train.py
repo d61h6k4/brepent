@@ -17,15 +17,17 @@
 from typing import Any, Iterable, Optional
 
 import chex
-import flax
 import jax
+import jax.numpy as jnp
+
+import flax
+import flax.linen as nn
+
 import jraph
 import ml_collections
 import optax
 import pathlib
 
-import flax.linen as nn
-import jax.numpy as jnp
 import numpy as np
 import tensorflow as tf
 
@@ -43,7 +45,7 @@ from brepnet import models
 
 def add_prefix_to_keys(result: dict[str, Any], prefix: str) -> dict[str, Any]:
     """Adds a prefix to the keys of a dict, returning a new dict."""
-    return {f'{prefix}_{key}': val for key, val in result.items()}
+    return {f"{prefix}_{key}": val for key, val in result.items()}
 
 
 def remove_labels(graph: jraph.GraphsTuple) -> jraph.GraphsTuple:
@@ -54,7 +56,7 @@ def remove_labels(graph: jraph.GraphsTuple) -> jraph.GraphsTuple:
 def create_model(config: ml_collections.ConfigDict,
                  deterministic: bool) -> nn.Module:
     """Creates a Flax model, as specified by the config."""
-    if config.model == 'GraphNet':
+    if config.model == "GraphNet":
         return models.GraphNet(
             latent_size=config.latent_size,
             num_mlp_layers=config.num_mlp_layers,
@@ -65,7 +67,7 @@ def create_model(config: ml_collections.ConfigDict,
             layer_norm=config.layer_norm,
             use_edge_model=config.use_edge_model,
             deterministic=deterministic)
-    if config.model == 'GraphConvNet':
+    if config.model == "GraphConvNet":
         return models.GraphConvNet(
             latent_size=config.latent_size,
             num_mlp_layers=config.num_mlp_layers,
@@ -75,18 +77,18 @@ def create_model(config: ml_collections.ConfigDict,
             skip_connections=config.skip_connections,
             layer_norm=config.layer_norm,
             deterministic=deterministic)
-    raise ValueError(f'Unsupported model: {config.model}.')
+    raise ValueError(f"Unsupported model: {config.model}.")
 
 
 def create_optimizer(
         config: ml_collections.ConfigDict) -> optax.GradientTransformation:
     """Creates an optimizer, as specified by the config."""
-    if config.optimizer == 'adam':
+    if config.optimizer == "adam":
         return optax.adam(learning_rate=config.learning_rate)
-    if config.optimizer == 'sgd':
+    if config.optimizer == "sgd":
         return optax.sgd(learning_rate=config.learning_rate,
                          momentum=config.momentum)
-    raise ValueError(f'Unsupported optimizer: {config.optimizer}.')
+    raise ValueError(f"Unsupported optimizer: {config.optimizer}.")
 
 
 def get_predicted_logits(
@@ -103,32 +105,25 @@ def get_valid_mask(labels: jnp.ndarray,
     """Gets the binary mask indicating only valid labels and graphs."""
     labels_mask = jnp.where(labels != 8, True, False)
 
-    # Since we have extra 'dummy' graphs in our batch due to padding, we want
+    # Since we have extra "dummy" graphs in our batch due to padding, we want
     # to mask out any loss associated with the dummy graphs.
     node_mask = jraph.get_node_padding_mask(graphs)
 
     # Combine the mask over labels with the mask over graphs.
+    # return node_mask
     return labels_mask & node_mask
-
-
-def predictions_match_labels(*, logits: jnp.ndarray, labels: jnp.ndarray,
-                             **kwargs) -> jnp.ndarray:
-    """Returns a binary array indicating where predictions match the labels."""
-    del kwargs  # Unused.
-    preds = (logits > 0)
-    return (preds == labels).astype(jnp.float32)
 
 
 @flax.struct.dataclass
 class TrainMetrics(metrics.Collection):
+    accuracy: metrics.Accuracy
     loss: metrics.Average.from_output("loss")
 
 
 @flax.struct.dataclass
 class EvalMetrics(metrics.Collection):
-
-    #accuracy: metrics.Average.from_fun(predictions_match_labels)
-    loss: metrics.Average.from_output('loss')
+    accuracy: metrics.Accuracy
+    loss: metrics.Average.from_output("loss")
 
 
 @jax.jit
@@ -149,7 +144,7 @@ def train_step(
         # Compute logits and resulting loss.
         logits = get_predicted_logits(curr_state, graphs, rngs)
         mask = get_valid_mask(labels, graphs)
-        loss = optax.softmax_cross_entropy(logits, jax.nn.one_hot(labels, 8))
+        loss = optax.softmax_cross_entropy(logits, jax.nn.one_hot(labels, 9))
         mean_loss = jnp.sum(jnp.where(mask, loss, 0)) / jnp.sum(mask)
 
         return mean_loss, (loss, logits, labels, mask)
@@ -185,7 +180,7 @@ def evaluate_step(
     mask = get_valid_mask(labels, graphs)
 
     # Compute the various metrics.
-    loss = optax.softmax_cross_entropy(logits, jax.nn.one_hot(labels, 8))
+    loss = optax.softmax_cross_entropy(logits, jax.nn.one_hot(labels, 9))
 
     return EvalMetrics.single_from_model_output(loss=loss,
                                                 logits=logits,
@@ -234,15 +229,15 @@ def train_and_evaluate(config: ml_collections.ConfigDict,
     writer.write_hparams(config.to_dict())
 
     # Get datasets, organized by split.
-    logging.info('Obtaining datasets.')
+    logging.info("Obtaining datasets.")
     datasets = input_pipeline.get_datasets(config.batch_size)
-    train_iter = iter(datasets['train'])
+    train_iter = iter(datasets["train"])
 
     # Create and initialize the network.
-    logging.info('Initializing network.')
+    logging.info("Initializing network.")
     rng = jax.random.PRNGKey(0)
     rng, init_rng = jax.random.split(rng)
-    init_graphs = next(datasets['train'].as_numpy_iterator())
+    init_graphs = next(datasets["train"].as_numpy_iterator())
     init_graphs = remove_labels(init_graphs)
     init_net = create_model(config, deterministic=True)
     params = jax.jit(init_net.init)(init_rng, init_graphs)
@@ -260,7 +255,7 @@ def train_and_evaluate(config: ml_collections.ConfigDict,
     # Set up checkpointing of the model.
     # The input pipeline cannot be checkpointed in its current form,
     # due to the use of stateful operations.
-    checkpoint_dir = pathlib.Path(workdir) / 'checkpoints'
+    checkpoint_dir = pathlib.Path(workdir) / "checkpoints"
     ckpt = checkpoint.Checkpoint(str(checkpoint_dir), max_to_keep=2)
     state = ckpt.restore_or_initialize(state)
     initial_step = int(state.step) + 1
@@ -276,19 +271,19 @@ def train_and_evaluate(config: ml_collections.ConfigDict,
     hooks = [report_progress, profiler]
 
     # Begin training loop.
-    logging.info('Starting training.')
+    logging.info("Starting training.")
     train_metrics = None
     for step in range(initial_step, config.num_train_steps + 1):
 
-        # Split PRNG key, to ensure different 'randomness' for every step.
+        # Split PRNG key, to ensure different "randomness" for every step.
         rng, dropout_rng = jax.random.split(rng)
 
         # Perform one step of training.
-        with jax.profiler.StepTraceAnnotation('train', step_num=step):
+        with jax.profiler.StepTraceAnnotation("train", step_num=step):
             graphs = jax.tree_map(np.asarray, next(train_iter))
             state, metrics_update = train_step(state,
                                                graphs,
-                                               rngs={'dropout': dropout_rng})
+                                               rngs={"dropout": dropout_rng})
 
             # Update metrics.
             if train_metrics is None:
@@ -297,7 +292,7 @@ def train_and_evaluate(config: ml_collections.ConfigDict,
                 train_metrics = train_metrics.merge(metrics_update)
 
         # Quick indication that training is happening.
-        logging.log_first_n(logging.INFO, 'Finished training step %d.', 10,
+        logging.log_first_n(logging.INFO, "Finished training step %d.", 10,
                             step)
         for hook in hooks:
             hook(step)
@@ -306,15 +301,15 @@ def train_and_evaluate(config: ml_collections.ConfigDict,
         is_last_step = (step == config.num_train_steps - 1)
         if step % config.log_every_steps == 0 or is_last_step:
             writer.write_scalars(
-                step, add_prefix_to_keys(train_metrics.compute(), 'train'))
+                step, add_prefix_to_keys(train_metrics.compute(), "train"))
             train_metrics = None
 
         # Evaluate on validation and test splits, if required.
         if step % config.eval_every_steps == 0 or is_last_step:
             eval_state = eval_state.replace(params=state.params)
 
-            splits = ['test']
-            with report_progress.timed('eval'):
+            splits = ["test"]
+            with report_progress.timed("eval"):
                 eval_metrics = evaluate_model(eval_state,
                                               datasets,
                                               splits=splits)
@@ -325,6 +320,6 @@ def train_and_evaluate(config: ml_collections.ConfigDict,
 
         # Checkpoint model, if required.
         if step % config.checkpoint_every_steps == 0 or is_last_step:
-            with report_progress.timed('checkpoint'):
+            with report_progress.timed("checkpoint"):
                 ckpt.save(state)
     return state

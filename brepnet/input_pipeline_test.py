@@ -22,46 +22,47 @@ from absl.testing import parameterized
 
 from brepnet import input_pipeline
 
+
 def get_dummy_datasets(dataset_length: int):
-  """Returns a set of datasets of unbatched GraphsTuples."""
-  # The dummy graph.
-  num_nodes = 3
-  num_edges = 4
-  dummy_graph = jraph.GraphsTuple(
-      n_node=tf.expand_dims(num_nodes, 0),
-      n_edge=tf.expand_dims(num_edges, 0),
-      senders=tf.zeros(num_edges, dtype=tf.int32),
-      receivers=tf.ones(num_edges, dtype=tf.int32),
-      nodes=tf.zeros((num_nodes, 9)),
-      edges=tf.ones((num_edges, 3)),
-      globals=tf.ones((1, 128), dtype=tf.int64),
-  )
-  graphs_spec = input_pipeline.specs_from_graphs_tuple(dummy_graph)
+    """Returns a set of datasets of unbatched GraphsTuples."""
+    # The dummy graph.
+    num_nodes = 3
+    num_edges = 4
+    dummy_graph = jraph.GraphsTuple(
+        n_node=tf.expand_dims(num_nodes, 0),
+        n_edge=tf.expand_dims(num_edges, 0),
+        senders=tf.zeros(num_edges, dtype=tf.int32),
+        receivers=tf.ones(num_edges, dtype=tf.int32),
+        nodes=tf.zeros((num_nodes, 9)),
+        edges=tf.ones((num_edges, 3)),
+        globals=tf.ones((1, 128), dtype=tf.int64),
+    )
+    graphs_spec = input_pipeline.specs_from_graphs_tuple(dummy_graph)
 
-  # Yields a set of graphs for the current split.
-  def get_dummy_graphs():
-    for _ in range(dataset_length):
-      yield dummy_graph
+    # Yields a set of graphs for the current split.
+    def get_dummy_graphs():
+        for _ in range(dataset_length):
+            yield dummy_graph
 
-  datasets = {}
-  for split in ['train', 'validation', 'test']:
-    datasets[split] = tf.data.Dataset.from_generator(
-        get_dummy_graphs, output_signature=graphs_spec)
-  return datasets
+    datasets = {}
+    for split in ["train", "validation", "test"]:
+        datasets[split] = tf.data.Dataset.from_generator(
+            get_dummy_graphs, output_signature=graphs_spec)
+    return datasets
+
 
 class InputPipelineTest(parameterized.TestCase):
+    def setUp(self):
+        super().setUp()
+        self.datasets = get_dummy_datasets(20)
 
-  def setUp(self):
-    super().setUp()
-    self.datasets = get_dummy_datasets(20)
-
-  @parameterized.product(
-      valid_batch_size=[2, 5, 12, 15],)
-  def test_estimate_padding_budget_valid(self, valid_batch_size):
-    budget = input_pipeline.estimate_padding_budget_for_batch_size(
-        self.datasets['train'], valid_batch_size, num_estimation_graphs=1)
-    self.assertEqual(budget.n_graph, valid_batch_size)
+    @parameterized.product(
+        valid_batch_size=[2, 5, 12, 15], )
+    def test_estimate_padding_budget_valid(self, valid_batch_size):
+        budget = input_pipeline.estimate_padding_budget_for_batch_size(
+            self.datasets["train"], valid_batch_size, num_estimation_graphs=1)
+        self.assertEqual(budget.n_graph, valid_batch_size)
 
 
 if __name__ == "__main__":
-  absltest.main()
+    absltest.main()
