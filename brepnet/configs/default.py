@@ -29,14 +29,14 @@ def get_config():
 
   # Training hyperparameters.
   config.batch_size = 256
-  config.num_train_steps = 1_000
+  config.num_train_steps = 2_000
   config.log_every_steps = 100
   config.eval_every_steps = 1_000
   config.checkpoint_every_steps = 10_000
 
   # GNN hyperparameters.
   config.model = 'GraphConvNet'
-  config.message_passing_steps = 2
+  config.message_passing_steps = 3
   config.latent_size = 256
   config.dropout_rate = 0.1
   config.num_mlp_layers = 2

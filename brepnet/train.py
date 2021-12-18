@@ -13,10 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Train the BRepNet."""
-# from __future__ import annotations
 from typing import Any, Iterable, Optional
 
-import chex
 import jax
 import jax.numpy as jnp
 
@@ -215,12 +213,12 @@ def evaluate_model(state: train_state.TrainState,
 def train_and_evaluate(config: ml_collections.ConfigDict,
                        workdir: str) -> train_state.TrainState:
     """Execute model training and evaluation loop.
-  Args:
-    config: Hyperparameter configuration for training and evaluation.
-    workdir: Directory where the TensorBoard summaries are written to.
-  Returns:
-    The train state (which includes the `.params`).
-  """
+    Args:
+        config: Hyperparameter configuration for training and evaluation.
+        workdir: Directory where the TensorBoard summaries are written to.
+    Returns:
+        The train state (which includes the `.params`).
+    """
     # We only support single-host training.
     assert jax.process_count() == 1
 
