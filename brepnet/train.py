@@ -142,7 +142,7 @@ def train_step(
         # Compute logits and resulting loss.
         logits = get_predicted_logits(curr_state, graphs, rngs)
         mask = get_valid_mask(labels, graphs)
-        loss = optax.softmax_cross_entropy(logits, jax.nn.one_hot(labels, 9))
+        loss = optax.softmax_cross_entropy(logits, jax.nn.one_hot(labels, 8))
         mean_loss = jnp.sum(jnp.where(mask, loss, 0)) / jnp.sum(mask)
 
         return mean_loss, (loss, logits, labels, mask)
@@ -178,7 +178,7 @@ def evaluate_step(
     mask = get_valid_mask(labels, graphs)
 
     # Compute the various metrics.
-    loss = optax.softmax_cross_entropy(logits, jax.nn.one_hot(labels, 9))
+    loss = optax.softmax_cross_entropy(logits, jax.nn.one_hot(labels, 8))
 
     return EvalMetrics.single_from_model_output(loss=loss,
                                                 logits=logits,
@@ -228,7 +228,7 @@ def train_and_evaluate(config: ml_collections.ConfigDict,
 
     # Get datasets, organized by split.
     logging.info("Obtaining datasets.")
-    datasets = input_pipeline.get_datasets(config.batch_size)
+    datasets = input_pipeline.get_datasets(config.configuration, config.batch_size)
     train_iter = iter(datasets["train"])
 
     # Create and initialize the network.

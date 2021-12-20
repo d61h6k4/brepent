@@ -23,25 +23,28 @@ def get_config():
   """Get the default hyperparameter configuration."""
   config = ml_collections.ConfigDict()
 
+  # Dataset
+  config.configuration = "simple_edge"
+
   # Optimizer.
-  config.optimizer = 'adam'
+  config.optimizer = "adam"
   config.learning_rate = 1e-3
 
   # Training hyperparameters.
   config.batch_size = 256
-  config.num_train_steps = 2_000
+  config.num_train_steps = 500
   config.log_every_steps = 100
-  config.eval_every_steps = 1_000
+  config.eval_every_steps = 200
   config.checkpoint_every_steps = 10_000
 
   # GNN hyperparameters.
-  config.model = 'GraphConvNet'
+  config.model = "GraphConvNet"
   config.message_passing_steps = 3
-  config.latent_size = 256
+  config.latent_size = 120
   config.dropout_rate = 0.1
   config.num_mlp_layers = 2
-  config.num_classes = 8+1
-  config.skip_connections = True
+  config.num_classes = 8
+  config.skip_connections = False
   config.layer_norm = True
 
   return config

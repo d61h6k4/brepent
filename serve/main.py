@@ -277,7 +277,8 @@ def main(argv):
     platform.work_unit().create_artifact(platform.ArtifactType.DIRECTORY,
                                          FLAGS.workdir, "workdir")
 
-    checkpoint_dir = pathlib.Path(FLAGS.workdir) / "checkpoints"
+    workdir = pathlib.Path(FLAGS.workdir)
+    checkpoint_dir =  workdir / "checkpoints"
     state_dict = checkpoint.load_state_dict(str(checkpoint_dir))
     model = create_model(FLAGS.config, deterministic=True)
 
@@ -328,7 +329,7 @@ def main(argv):
         show_info(scene, info_canvas, labels_name2color, preds, gts)
 
     scene.framerate = 2
-    scene.save_as_html("demo.html", title="Show the graph of a CAD")
+    scene.save_as_html(str(FLAGS.workdir / "demo.html"), title="Show the graph of a CAD")
 
 
 if __name__ == "__main__":

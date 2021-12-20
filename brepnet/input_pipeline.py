@@ -24,6 +24,7 @@ import numpy as np
 import tensorflow as tf
 import tensorflow_datasets.public_api as tfds
 
+import brep2graph.configurations
 import tfds_fusion_360_gallery_dataset.cad.fusion360gallery.fusion360gallery  # pylint: disable=unused-import
 
 
@@ -36,6 +37,7 @@ class GraphsTupleSize(NamedTuple):
 
 def get_raw_datasets() -> dict[str, tf.data.Dataset]:
     """Returns datasets as tf.data.Dataset, organized by split."""
+
     ds_builder = tfds.builder("fusion360_gallery_segmentation")
     ds_builder.download_and_prepare()
     ds_splits = ["train", "test"]
@@ -46,7 +48,8 @@ def get_raw_datasets() -> dict[str, tf.data.Dataset]:
     return datasets
 
 
-def get_datasets(batch_size: int) -> dict[str, tf.data.Dataset]:
+def get_datasets(configuration: str,
+                 batch_size: int) -> dict[str, tf.data.Dataset]:
     """Returns datasets of batched GraphTuples, organized by split."""
     if batch_size <= 1:
         raise ValueError(
@@ -57,9 +60,11 @@ def get_datasets(batch_size: int) -> dict[str, tf.data.Dataset]:
     # Process each split seperately
     for split_name in datasets:
         datasets[split_name] = datasets[split_name].map(
-            convert_to_graph_tuples,
+            functools.partial(configure, configuration=configuration),
             num_parallel_calls=tf.data.AUTOTUNE,
-            deterministic=True)
+            deterministic=True).map(convert_to_graph_tuples,
+                                    num_parallel_calls=tf.data.AUTOTUNE,
+                                    deterministic=True)
 
     # Compute the padding budget for the requested batch size.
     budget = estimate_padding_budget_for_batch_size(datasets["train"],
@@ -97,6 +102,23 @@ def get_datasets(batch_size: int) -> dict[str, tf.data.Dataset]:
 
         datasets[split_name] = dataset_split
     return datasets
+
+
+def configure(raw_features: dict[str, tf.Tensor],
+              configuration: str) -> dict[str, tf.Tensor]:
+    """Create the according `configuration` graph from features."""
+    if configuration == "simple_edge":
+        configurer = brep2graph.configurations.simple_edge
+    else:
+        raise RuntimeError(f"Unknown configuration: {configuration}")
+
+    g = configurer(
+        raw_features["face_features"], raw_features["edge_features"],
+        raw_features["coedge_features"], raw_features["coedge_to_next"],
+        raw_features["coedge_to_mate"], raw_features["coedge_to_face"],
+        raw_features["coedge_to_edge"])
+    g["face_labels"] = raw_features["face_labels"]
+    return g
 
 
 def convert_to_graph_tuples(graph: dict[str, tf.Tensor]) -> jraph.GraphsTuple:
