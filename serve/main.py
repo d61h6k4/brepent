@@ -45,14 +45,15 @@ from OCC.Core.GProp import GProp_GProps
 from OCC.Core.BRepGProp import brepgprop_LinearProperties, brepgprop_SurfaceProperties
 
 from brepnet.train import create_model
+from brepnet.input_pipeline import configure
 
-from brep2graph import graph_from_brep
-from brep2graph.utils import load_body
-from brep2graph.brepnet_features import scale_solid_to_unit_box
+import brep2graph.brepnet_features
+import brep2graph.utils
 
 FLAGS = flags.FLAGS
 
-flags.DEFINE_string("dataset", None, "Directory stores steps and/or seg files.")
+flags.DEFINE_string("dataset", None,
+                    "Directory stores steps and/or seg files.")
 flags.DEFINE_string("workdir", None, "Directory to store model data.")
 config_flags.DEFINE_config_file(
     "config",
@@ -62,8 +63,8 @@ config_flags.DEFINE_config_file(
 
 COLOURS = [
     "#EA1821", "#F1D3D3", "#F2CB6C", "#3B755F", "#FF2A93", "#7DE0E6",
-    "#6B7C95", "#19AAD1", "#FFCC4C", "#FFFFFF", "#FF89B5",
-    "#D1BDFF", "#CDB670", "#F8DA1B", "#9A008A", "#7B76A6", "#26CB4D"
+    "#6B7C95", "#19AAD1", "#FFCC4C", "#FFFFFF", "#FF89B5", "#D1BDFF",
+    "#CDB670", "#F8DA1B", "#9A008A", "#7B76A6", "#26CB4D"
 ]
 
 
@@ -75,11 +76,12 @@ def hex_to_rgb(value):
 
 
 def load_cad(
-    stepfile: pathlib.Path
+    stepfile: pathlib.Path,
+    configuration: str
 ) -> Tuple[jraph.GraphsTuple, collections.defaultdict]:
-    loaded_body = load_body(stepfile)
+    loaded_body = brep2graph.utils.load_body(stepfile)
 
-    body = scale_solid_to_unit_box(loaded_body)
+    body = brep2graph.utils.scale_solid_to_unit_box(loaded_body)
     mesh = collections.defaultdict(lambda: {
         "triangulation": collections.deque(),
         "location": None,
@@ -156,7 +158,40 @@ def load_cad(
                   centre_of_mass.Y(),
                   centre_of_mass.Z()]]) + np.random.rand(1, 3) / 5.
 
-    graph = graph_from_brep(loaded_body)
+    if not brep2graph.utils.check_manifold(body):
+        raise RuntimeError("Non-manifold bodies are not supported.")
+
+    if not brep2graph.utils.check_closed(body):
+        raise RuntimeError("Bodies which are not closed are not supported")
+
+    if not brep2graph.utils.check_unique_coedges(body):
+        raise RuntimeError(
+            "Bodies where the same coedge is uses in multiple loops are not supported"
+        )
+
+    entity_mapper = brep2graph.brepnet_features.EntityMapper(body)
+
+    face_features = brep2graph.brepnet_features.face_features_from_body(
+        body, entity_mapper)
+    edge_features = brep2graph.brepnet_features.edge_features_from_body(
+        body, entity_mapper)
+    coedge_features = brep2graph.brepnet_features.coedge_features_from_body(
+        body, entity_mapper)
+
+    coedge_to_next, coedge_to_mate, coedge_to_face, coedge_to_edge = brep2graph.brepnet_features.build_incidence_arrays(
+        body, entity_mapper)
+
+    raw_features = {
+        "face_labels": None,
+        "face_features": face_features,
+        "edge_features": edge_features,
+        "coedge_features": coedge_features,
+        "coedge_to_next": coedge_to_next,
+        "coedge_to_mate": coedge_to_mate,
+        "coedge_to_face": coedge_to_face,
+        "coedge_to_edge": coedge_to_edge,
+    }
+    graph = next(configure([raw_features], configuration))
     jgraph = jraph.GraphsTuple(nodes=graph["nodes"],
                                edges=tf.zeros(graph["n_edge"], tf.float32),
                                receivers=graph["receivers"],
@@ -278,7 +313,7 @@ def main(argv):
                                          FLAGS.workdir, "workdir")
 
     workdir = pathlib.Path(FLAGS.workdir)
-    checkpoint_dir =  workdir / "checkpoints"
+    checkpoint_dir = workdir / "checkpoints"
     state_dict = checkpoint.load_state_dict(str(checkpoint_dir))
     model = create_model(FLAGS.config, deterministic=True)
 
@@ -306,7 +341,7 @@ def main(argv):
         if segfile.exists() is not None:
             labels = load_labels(segfile)
 
-        (graph, storage) = load_cad(stepfile)
+        (graph, storage) = load_cad(stepfile, FLAGS.config.configuration)
         preds = [
             labels_name[l]
             for l in jnp.argmax(model.apply(state_dict["params"], graph).nodes,
@@ -323,13 +358,13 @@ def main(argv):
                 if storage[ix]["type"] == "FACE":
                     storage[ix]["color"] = labels_name2color[pred]
 
-
         show_cad(scene, cad_canvas, storage)
         show_graph(scene, graph_canvas, graph, storage)
         show_info(scene, info_canvas, labels_name2color, preds, gts)
 
     scene.framerate = 2
-    scene.save_as_html(str(FLAGS.workdir / "demo.html"), title="Show the graph of a CAD")
+    scene.save_as_html(str(workdir / "demo.html"),
+                       title="Show the graph of a CAD")
 
 
 if __name__ == "__main__":

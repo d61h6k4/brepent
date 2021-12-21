@@ -15,7 +15,7 @@
 """Exposes the Fusion 360 Gallery dataset in a convinent format."""
 
 from __future__ import annotations
-from typing import NamedTuple
+from typing import NamedTuple, Generator, Iterator
 
 import functools
 import jraph
@@ -58,13 +58,23 @@ def get_datasets(configuration: str,
     datasets = get_raw_datasets()
 
     # Process each split seperately
+    output_signature = {
+        "face_labels": tf.TensorSpec(shape=(None, ), dtype=tf.uint32),
+        "n_node": tf.TensorSpec(shape=(1, ), dtype=tf.int32),
+        "n_edge": tf.TensorSpec(shape=(1, ), dtype=tf.int32),
+        "nodes": tf.TensorSpec(shape=(None, 22), dtype=tf.float32),
+        "senders": tf.TensorSpec(shape=(None, ), dtype=tf.int32),
+        "receivers": tf.TensorSpec(shape=(None, ), dtype=tf.int32)
+    }
     for split_name in datasets:
-        datasets[split_name] = datasets[split_name].map(
-            functools.partial(configure, configuration=configuration),
-            num_parallel_calls=tf.data.AUTOTUNE,
-            deterministic=True).map(convert_to_graph_tuples,
-                                    num_parallel_calls=tf.data.AUTOTUNE,
-                                    deterministic=True)
+        datasets[split_name] = tf.data.Dataset.from_generator(
+            functools.partial(configure,
+                              datasets[split_name].as_numpy_iterator(),
+                              configuration),
+            output_signature=output_signature).map(
+                convert_to_graph_tuples,
+                num_parallel_calls=tf.data.AUTOTUNE,
+                deterministic=True)
 
     # Compute the padding budget for the requested batch size.
     budget = estimate_padding_budget_for_batch_size(datasets["train"],
@@ -84,7 +94,7 @@ def get_datasets(configuration: str,
         if split_name == "train":
             dataset_split = dataset_split.shuffle(
                 100, reshuffle_each_iteration=True)
-            dataset_split = dataset_split.repeat()
+            dataset_split = dataset_split.cache().repeat()
 
         # Batch and pad each split.
         batching_fn = functools.partial(
@@ -96,7 +106,6 @@ def get_datasets(configuration: str,
         dataset_split = tf.data.Dataset.from_generator(
             batching_fn, output_signature=padded_graphs_spec)
 
-        # We cache the test set, since it is small.
         if split_name in ["test"]:
             dataset_split = dataset_split.cache()
 
@@ -104,21 +113,68 @@ def get_datasets(configuration: str,
     return datasets
 
 
-def configure(raw_features: dict[str, tf.Tensor],
-              configuration: str) -> dict[str, tf.Tensor]:
+def configure(
+        raw_features: Iterator[dict[str, np.ndarray]],
+        configuration: str) -> Generator[dict[str, np.ndarray], None, None]:
     """Create the according `configuration` graph from features."""
+    def scale(v, m, s):
+        return (v - m) / s
+
+    # Calculated on the train split.
+    face_features_mean = np.array([[
+        0.604294, 0.2495269, 0.020479, 0.00919822, 0.02745675, 0.47966793,
+        0.00862584
+    ]],
+                                  dtype=np.float32)
+    edge_features_mean = np.array([[
+        0.13765144, 0.6492544, 0.21118468, 0.63998026, 0.2445651, 0.08757726,
+        0.00908325, 0.65738535, 0., 0., 0., 0.0833685, 0.00375927, 0.
+    ]],
+                                  dtype=np.float32)
+    coedge_features_mean = np.array([[0.49989948]], dtype=np.float32)
+    face_features_std = np.sqrt(
+        np.array([[
+            0.23911904, 0.1872673, 0.02005919, 0.00911351, 0.02670261,
+            1.015765, 0.00855153
+        ]]))
+    edge_features_std = np.sqrt(
+        np.array([[
+            0.1187034, 0.22772267, 0.16658206, 1.0168835, 0.18475401,
+            0.07990564, 0.00900064, 0.22522625, 1., 1., 1., 0.07641727,
+            0.00374514, 1.
+        ]]))
+    coedge_features_std = np.sqrt(np.array([[0.2499998]]))
+
     if configuration == "simple_edge":
         configurer = brep2graph.configurations.simple_edge
+    elif configuration == "assymetric":
+        configurer = brep2graph.configurations.assymetric
+    elif configuration == "assymetric+":
+        configurer = brep2graph.configurations.assymetric_plus
+    elif configuration == "assymetric++":
+        configurer = brep2graph.configurations.assymetric_plus_plus
+    elif configuration == "winged_edge":
+        configurer = brep2graph.configurations.winged_edge
+    elif configuration == "winged_edge+":
+        configurer = brep2graph.configurations.winged_edge_plus
+    elif configuration == "winged_edge++":
+        configurer = brep2graph.configurations.winged_edge_plus_plus
     else:
         raise RuntimeError(f"Unknown configuration: {configuration}")
 
-    g = configurer(
-        raw_features["face_features"], raw_features["edge_features"],
-        raw_features["coedge_features"], raw_features["coedge_to_next"],
-        raw_features["coedge_to_mate"], raw_features["coedge_to_face"],
-        raw_features["coedge_to_edge"])
-    g["face_labels"] = raw_features["face_labels"]
-    return g
+    for raw_feature in raw_features:
+        g = configurer(
+            scale(raw_feature["face_features"], face_features_mean,
+                  face_features_std),
+            scale(raw_feature["edge_features"], edge_features_mean,
+                  edge_features_std),
+            scale(raw_feature["coedge_features"], coedge_features_mean,
+                  coedge_features_std), raw_feature["coedge_to_next"],
+            raw_feature["coedge_to_mate"], raw_feature["coedge_to_face"],
+            raw_feature["coedge_to_edge"])
+        g["face_labels"] = raw_feature["face_labels"]
+
+        yield g
 
 
 def convert_to_graph_tuples(graph: dict[str, tf.Tensor]) -> jraph.GraphsTuple:
